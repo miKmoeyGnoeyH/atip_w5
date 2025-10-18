@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>게시글 테스트 - REST vs GraphQL</title>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; margin: 24px; }
+    h1 { margin: 0 0 16px; }
+    .section { border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-bottom: 20px; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+    label { font-weight: 600; }
+    input, select { padding: 6px 8px; }
+    button { padding: 8px 12px; cursor: pointer; }
+    pre { background: #0b1020; color: #c9d1d9; padding: 12px; border-radius: 8px; overflow: auto; max-height: 300px; }
+    .stat { font-size: 12px; color: #6b7280; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border-bottom: 1px solid #e5e7eb; text-align: left; padding: 8px; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+  <script>
+    async function fetchRest() {
+      const page = document.getElementById('page').value || 1;
+      const limit = document.getElementById('limit').value || 5;
+      const sortBy = document.getElementById('sortBy').value || 'createdAt';
+      const order = document.getElementById('order').value || 'desc';
+      const q = document.getElementById('q').value || '';
+      const url = `/posts?page=${page}&limit=${limit}&sortBy=${encodeURIComponent(sortBy)}&order=${encodeURIComponent(order)}${q?`&q=${encodeURIComponent(q)}`:''}`;
+      const t0 = performance.now();
+      const res = await fetch(url);
+      const buf = await res.clone().arrayBuffer();
+      const json = await res.json();
+      const t1 = performance.now();
+      document.getElementById('restTime').textContent = `${(t1 - t0).toFixed(1)} ms`;
+      document.getElementById('restSize').textContent = `${buf.byteLength} bytes`;
+      document.getElementById('restOut').textContent = JSON.stringify(json, null, 2);
+      // 표 요약
+      const tbody = document.getElementById('restTableBody');
+      tbody.innerHTML = '';
+      (json.items || []).forEach(p => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${p.id}</td><td>${escapeHtml(p.title)}</td><td>${p.authorUsername ?? ''}</td><td>${p.createdAt}</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    async function fetchGraphql() {
+      const page = Number(document.getElementById('page').value || 1);
+      const limit = Number(document.getElementById('limit').value || 5);
+      const sortBy = document.getElementById('sortBy').value || 'createdAt';
+      const q = document.getElementById('q').value || null;
+      const order = document.getElementById('order').value?.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+      const query = `query($p:Int,$l:Int,$q:String,$o:SortOrder,$s:String){\n  posts(page:$p,limit:$l,q:$q,order:$o,sortBy:$s){\n    page totalPages totalElements\n    content{ id title createdAt author{ id username } }\n  }\n}`;
+      const variables = { p: page, l: limit, q, o: order, s: sortBy };
+      const t0 = performance.now();
+      const res = await fetch('/graphql', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, variables })
+      });
+      const buf = await res.clone().arrayBuffer();
+      const json = await res.json();
+      const t1 = performance.now();
+      document.getElementById('gqlTime').textContent = `${(t1 - t0).toFixed(1)} ms`;
+      document.getElementById('gqlSize').textContent = `${buf.byteLength} bytes`;
+      document.getElementById('gqlOut').textContent = JSON.stringify(json, null, 2);
+      // 표 요약
+      const tbody = document.getElementById('gqlTableBody');
+      tbody.innerHTML = '';
+      const list = json?.data?.posts?.content ?? [];
+      list.forEach(p => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${p.id}</td><td>${escapeHtml(p.title)}</td><td>${p.author?.username ?? ''}</td><td>${p.createdAt}</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    async function fetchUsersWithPosts() {
+      const query = `{ users(limit:5){ id username posts(limit:3){ id title } } }`;
+      const t0 = performance.now();
+      const res = await fetch('/graphql', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query }) });
+      const buf = await res.clone().arrayBuffer();
+      const json = await res.json();
+      const t1 = performance.now();
+      document.getElementById('gqlUsersTime').textContent = `${(t1 - t0).toFixed(1)} ms`;
+      document.getElementById('gqlUsersSize').textContent = `${buf.byteLength} bytes`;
+      document.getElementById('gqlUsersOut').textContent = JSON.stringify(json, null, 2);
+    }
+
+    function escapeHtml(str) {
+      return String(str ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
+    }
+  </script>
+</head>
+<body>
+  <h1>게시글 테스트 (REST vs GraphQL)</h1>
+
+  <div class="section">
+    <div class="row">
+      <label>page</label>
+      <input id="page" type="number" value="1" min="1" style="width:80px" />
+      <label>limit</label>
+      <input id="limit" type="number" value="5" min="1" style="width:80px" />
+      <label>sortBy</label>
+      <select id="sortBy">
+        <option value="createdAt" selected>createdAt</option>
+        <option value="title">title</option>
+      </select>
+      <label>order</label>
+      <select id="order">
+        <option value="desc" selected>desc</option>
+        <option value="asc">asc</option>
+      </select>
+      <label>q</label>
+      <input id="q" placeholder="검색어(옵션)" style="width:180px" />
+      <button onclick="fetchRest()">REST 조회</button>
+      <button onclick="fetchGraphql()">GraphQL 조회</button>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="section">
+      <h3>REST 응답 요약</h3>
+      <div class="stat">시간: <span id="restTime">-</span> | 크기: <span id="restSize">-</span></div>
+      <table>
+        <thead><tr><th>ID</th><th>Title</th><th>Author</th><th>CreatedAt</th></tr></thead>
+        <tbody id="restTableBody"></tbody>
+      </table>
+      <h4>Raw</h4>
+      <pre id="restOut"></pre>
+    </div>
+    <div class="section">
+      <h3>GraphQL 응답 요약</h3>
+      <div class="stat">시간: <span id="gqlTime">-</span> | 크기: <span id="gqlSize">-</span></div>
+      <table>
+        <thead><tr><th>ID</th><th>Title</th><th>Author</th><th>CreatedAt</th></tr></thead>
+        <tbody id="gqlTableBody"></tbody>
+      </table>
+      <h4>Raw</h4>
+      <pre id="gqlOut"></pre>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>사용자 + 각 게시글 3개 (GraphQL)</h3>
+    <div class="row">
+      <button onclick="fetchUsersWithPosts()">실행</button>
+      <div class="stat">시간: <span id="gqlUsersTime">-</span> | 크기: <span id="gqlUsersSize">-</span></div>
+    </div>
+    <pre id="gqlUsersOut"></pre>
+  </div>
+
+  <script>
+    // 초기 자동 실행
+    fetchRest();
+    fetchGraphql();
+  </script>
+</body>
+</html>
+
+
